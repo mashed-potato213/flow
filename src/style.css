@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* 撑满视口宽度，禁用 iOS 因 viewport-fit=cover 引发的横向溢出 */
+  html,
+  body {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+  #app {
+    /* 用 dvh 让移动浏览器 URL 栏伸缩时高度同步变化；
+       兼容旧浏览器回退到 vh */
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  body {
+    @apply antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/*
+ * 统一 <input type="date"> 与 <select> 的渲染宽度。
+ * Webkit / Firefox 会在日期输入框右侧添加内置图标与额外内边距，
+ * 导致与等宽 select 视觉错位。这里重置其外观与图标占位。
+ */
+input[type='date'] {
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  min-height: 0; /* 重置 Webkit 默认最小高度，让元素自身的 h-* 生效 */
+  text-align: left !important; /* Webkit 默认居中日期值，强制靠左 */
+  text-align: -webkit-left !important;
+}
+
+/* 日期编辑区也强制靠左，覆盖 Webkit / iOS 内部控件 */
+input[type='date']::-webkit-datetime-edit {
+  text-align: left !important;
+}
+
+input[type='date']::-webkit-datetime-edit-fields-wrapper {
+  text-align: left !important;
+}
+
+input[type='date']::-webkit-date-and-time-value {
+  text-align: left !important;
+  margin: 0;
+}
+
+/* 隐藏 Webkit 自带的清除/旋转按钮，避免宽度跳变 */
+input[type='date']::-webkit-inner-spin-button,
+input[type='date']::-webkit-clear-button,
+input[type='date']::-webkit-datetime-edit-ampm-field {
+  display: none;
+  -webkit-appearance: none;
+}
+
+/* 压缩日期编辑区与日历图标，与 select 右内边距对齐 */
+input[type='date']::-webkit-datetime-edit {
+  padding: 0;
+}
+
+input[type='date']::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+input[type='date']::-webkit-calendar-picker-indicator {
+  opacity: 0.6;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  width: 1rem;
+  height: 1rem;
+}
+
+/* iOS / Android 安全区适配：避开刘海与底部 Home Indicator */
+@layer utilities {
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top), 0px);
+  }
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  }
+  .pb-tabbar {
+    /* 给主内容留出底部 tab bar + 安全区的高度 */
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  }
+  .pb-modal-safe {
+    /* 弹窗底部内边距，避开 iPhone Home Indicator */
+    padding-bottom: calc(env(safe-area-inset-bottom) + 1rem);
+  }
+}
+
+/*
+ * 全局 select 重置：iOS Safari 对 <select> 强制 native 渲染，
+ * 与 web 渲染的 <input> 视觉天然不一致。这里强制所有 select 使用 web 风格，
+ * 并加自定义下拉箭头，保持与同表单 input 视觉一致。
+ */
+select {
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  background-image: url("data:image/svg+xml;charset=US-ASCII,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'><path fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M3 6l5 5 5-5'/></svg>") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 0.75rem center !important;
+  background-size: 1rem !important;
+  padding-right: 2.25rem !important;
+}

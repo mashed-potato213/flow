@@ -1,0 +1,22 @@
+name = "flow"
+main = "worker/index.ts"
+compatibility_date = "2026-09-01"
+
+[build]
+command = "npm run build"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "flow-db"
+database_id = "64c1235d-bc19-4629-a705-e15c298cf115"  # 后续替换
+
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "flow-backups"
+
+[triggers]
+crons = ["0 3 * * *"]
