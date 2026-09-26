@@ -12,30 +12,30 @@ command = "npm run build"
 directory = "./dist"
 binding = "ASSETS"
 
-# 顶层默认 = 开发环境（指向独立 dev D1 / R2，避免污染生产）
-# 这样 wrangler dev / wrangler d1 --local 默认就走 dev
+# 顶层默认 = 生产环境
+# 这样 wrangler deploy 默认走生产，wrangler d1 --local 默认也是生产库本地版
 [[d1_databases]]
-binding = "DB"
-database_name = "flow-db-dev"
-database_id = "632939e6-9ebc-43fb-bfda-0822261a953d"
-
-[[r2_buckets]]
-binding = "BACKUPS"
-bucket_name = "flow-backups-dev"
-
-[triggers]
-crons = []  # dev 环境不开 cron
-
-# 生产环境（通过 --env production 覆盖）
-[env.production]
-[[env.production.d1_databases]]
 binding = "DB"
 database_name = "flow-db"
 database_id = "64c1235d-bc19-4629-a705-e15c298cf115"
 
-[[env.production.r2_buckets]]
+[[r2_buckets]]
 binding = "BACKUPS"
 bucket_name = "flow-backups"
 
-[env.production.triggers]
+[triggers]
 crons = ["0 3 * * *"]
+
+# 开发环境（通过 --env dev 切换，独立 D1 / R2）
+[env.dev]
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "flow-db-dev"
+database_id = "632939e6-9ebc-43fb-bfda-0822261a953d"
+
+[[env.dev.r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "flow-backups-dev"
+
+[env.dev.triggers]
+crons = []  # dev 环境不开 cron
