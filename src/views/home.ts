@@ -144,8 +144,8 @@ export async function renderHome(root: HTMLElement) {
               ${(selectedType === 'adjustment'
                 ? holdingAccounts(accounts)
                 : selectedType === 'transfer'
-                ? allAccounts(accounts)
-                : payableAccounts(accounts)
+                  ? allAccounts(accounts)
+                  : payableAccounts(accounts)
               )
                 .map(
                   (a) =>
