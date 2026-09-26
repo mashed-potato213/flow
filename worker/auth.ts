@@ -2,7 +2,9 @@
 import { nowIso } from './lib/ids';
 import { fail } from './lib/response';
 
-const ITERATIONS = 100_000;
+// OWASP 2023 推荐 ≥ 600,000 次（SHA-256）
+// 旧版本使用 100,000；verifyPassword 通过 stored 字符串里的 iter 字段兼容
+const ITERATIONS = 600_000;
 const SALT_BYTES = 16;
 const HASH_BYTES = 32;
 const TOKEN_BYTES = 32;
@@ -14,7 +16,7 @@ function toHex(buf: ArrayBuffer): string {
     .join('');
 }
 
-function fromHex(hex: string): Uint8Array<ArrayBuffer> {
+function fromHex(hex: string): Uint8Array {
   const out = new Uint8Array(new ArrayBuffer(hex.length / 2));
   for (let i = 0; i < out.length; i++) {
     out[i] = parseInt(hex.substr(i * 2, 2), 16);
@@ -47,8 +49,13 @@ export async function hashPassword(password: string): Promise<string> {
  * 验证密码是否匹配存储的哈希值
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, iterStr, saltHex, hashHex] = stored.split('$');
+  const parts = stored.split('$');
+  const scheme = parts[0];
+  const iterStr = parts[1];
+  const saltHex = parts[2];
+  const hashHex = parts[3];
   if (scheme !== 'pbkdf2') return false;
+  if (!iterStr || !saltHex || !hashHex) return false;
   const iterations = parseInt(iterStr, 10);
   if (!iterations || iterations < 1) return false;
   const salt = fromHex(saltHex);
@@ -81,9 +88,10 @@ export async function createSession(env: D1Database): Promise<string> {
   const token = generateToken();
   const now = new Date();
   const expires = new Date(now.getTime() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-  await env.prepare(
-    'INSERT INTO sessions (token, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?)',
-  )
+  await env
+    .prepare(
+      'INSERT INTO sessions (token, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?)',
+    )
     .bind(token, now.toISOString(), expires.toISOString(), now.toISOString())
     .run();
   return token;
@@ -100,14 +108,14 @@ export async function deleteSession(env: D1Database, token: string): Promise<voi
  * 验证 token 是否有效（存在 + 未过期），并刷新 last_used_at
  */
 export async function verifyToken(env: D1Database, token: string): Promise<boolean> {
-  const row = await env.prepare(
-    'SELECT expires_at FROM sessions WHERE token = ?',
-  )
+  const row = await env
+    .prepare('SELECT expires_at FROM sessions WHERE token = ?')
     .bind(token)
     .first<{ expires_at: string }>();
   if (!row) return false;
   if (new Date(row.expires_at) < new Date()) return false;
-  await env.prepare('UPDATE sessions SET last_used_at = ? WHERE token = ?')
+  await env
+    .prepare('UPDATE sessions SET last_used_at = ? WHERE token = ?')
     .bind(nowIso(), token)
     .run();
   return true;
@@ -117,9 +125,9 @@ export async function verifyToken(env: D1Database, token: string): Promise<boole
  * 是否已设置密码
  */
 export async function isPasswordSetup(env: D1Database): Promise<boolean> {
-  const row = await env.prepare(
-    "SELECT value FROM meta WHERE key = 'password_hash'",
-  ).first<{ value: string }>();
+  const row = await env
+    .prepare("SELECT value FROM meta WHERE key = 'password_hash'")
+    .first<{ value: string }>();
   return !!row?.value;
 }
 
@@ -127,9 +135,9 @@ export async function isPasswordSetup(env: D1Database): Promise<boolean> {
  * 获取密码哈希
  */
 export async function getPasswordHash(env: D1Database): Promise<string | null> {
-  const row = await env.prepare(
-    "SELECT value FROM meta WHERE key = 'password_hash'",
-  ).first<{ value: string }>();
+  const row = await env
+    .prepare("SELECT value FROM meta WHERE key = 'password_hash'")
+    .first<{ value: string }>();
   return row?.value || null;
 }
 
@@ -137,9 +145,10 @@ export async function getPasswordHash(env: D1Database): Promise<string | null> {
  * 设置密码哈希（upsert）
  */
 export async function setPasswordHash(env: D1Database, hash: string): Promise<void> {
-  await env.prepare(
-    "INSERT OR REPLACE INTO meta (key, value) VALUES ('password_hash', ?)",
-  ).bind(hash).run();
+  await env
+    .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('password_hash', ?)")
+    .bind(hash)
+    .run();
 }
 
 /**
@@ -148,7 +157,7 @@ export async function setPasswordHash(env: D1Database, hash: string): Promise<vo
 export function readTokenFromRequest(request: Request): string | null {
   const cookieHeader = request.headers.get('Cookie') || '';
   const match = cookieHeader.match(/flow_token=([^;]+)/);
-  return match ? match[1] : null;
+  return match && match[1] ? match[1] : null;
 }
 
 /**

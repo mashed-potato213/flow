@@ -13,7 +13,7 @@ import {
   pickColumns,
   reconcileTimestamp,
 } from '../lib/validate';
-import type { Account, Category, Transaction } from '../lib/types';
+// export.ts 暂未直接使用 Transaction 类型（仅通过 generic 推断）
 
 type EntityName = 'accounts' | 'categories' | 'transactions';
 
@@ -83,11 +83,8 @@ export async function importData(request: Request, env: D1Database): Promise<Res
   skipReasons.push(...categoryResult.reasons);
 
   // 处理交易
-  const txResult = await importEntity(
-    env,
-    'transactions',
-    body.data.transactions,
-    (item) => sanitizeTransaction(item),
+  const txResult = await importEntity(env, 'transactions', body.data.transactions, (item) =>
+    sanitizeTransaction(item),
   );
   inserted += txResult.inserted;
   skipped += txResult.skipped;
@@ -131,9 +128,10 @@ async function importEntity<T extends { id: string; last_modified: string }>(
 
   // 2. LWW：只 upsert 客户端较新的项（带时钟漂移防御）
   const ids = validItems.map((i) => i.id);
-  const { results: serverRows } = await env.prepare(
-    `SELECT id, last_modified FROM ${entity} WHERE id IN (${ids.map(() => '?').join(',')})`,
-  )
+  const { results: serverRows } = await env
+    .prepare(
+      `SELECT id, last_modified FROM ${entity} WHERE id IN (${ids.map(() => '?').join(',')})`,
+    )
     .bind(...ids)
     .all<{ id: string; last_modified: string }>();
   const serverMap = new Map(serverRows.map((r) => [r.id, r.last_modified]));

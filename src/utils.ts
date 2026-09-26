@@ -10,16 +10,20 @@ export function formatDate(d: Date = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
+// 单例 Intl.NumberFormat，避免每次调用都创建对象（性能优化）
+const cnyFormatter = new Intl.NumberFormat('zh-CN', {
+  style: 'currency',
+  currency: 'CNY',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
 /**
  * 格式化金额（人民币符号 + 千分位 + 两位小数）
  * 例：1234567.89 → "¥1,234,567.89"
  */
 export function formatMoney(amount: number): string {
-  const formatted = amount.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `¥${formatted}`;
+  return cnyFormatter.format(amount);
 }
 
 /**

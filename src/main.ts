@@ -8,7 +8,24 @@ import { renderCategories } from './views/categories';
 import { renderHome } from './views/home';
 import { renderList } from './views/list';
 import { renderSummary } from './views/summary';
-import { startAutoSync, syncAll } from './sync';
+import { startAutoSync, stopAutoSync, syncAll } from './sync';
+
+/**
+ * HTML 转义
+ */
+function escapeHtml(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c] || c,
+  );
+}
 
 async function bootstrap() {
   try {
@@ -27,7 +44,6 @@ async function bootstrap() {
       navigate('#/login');
     } else {
       // 已能连接服务，默认进入 home
-      // 各页面在加载时会自动处理鉴权失败的情况（Day 3+ 完善）
       if (!location.hash) navigate('#/home');
     }
 
@@ -46,15 +62,16 @@ async function bootstrap() {
     }
   } catch (e) {
     console.error('Bootstrap failed:', e);
-    // 渲染错误界面
     const root = document.getElementById('app');
     if (root) {
+      // 转义错误消息防止 XSS
+      const msg = escapeHtml(e instanceof Error ? e.message : '未知错误');
       root.innerHTML = `
         <div class="min-h-screen flex items-center justify-center p-8">
           <div class="bg-white rounded-xl p-6 max-w-sm text-center">
             <p class="text-4xl mb-4">⚠️</p>
             <h2 class="text-lg font-bold mb-2">启动失败</h2>
-            <p class="text-sm text-gray-600 mb-4">${e instanceof Error ? e.message : '未知错误'}</p>
+            <p class="text-sm text-gray-600 mb-4">${msg}</p>
             <button onclick="location.reload()" class="bg-primary text-white px-4 py-2 rounded-lg">重试</button>
           </div>
         </div>
@@ -65,5 +82,10 @@ async function bootstrap() {
 
 bootstrap();
 
-// 暴露 syncAll 用于调试
-(window as any).syncAll = syncAll;
+// 仅在开发环境暴露 syncAll 用于调试
+if (import.meta.env.DEV) {
+  (window as unknown as { syncAll: typeof syncAll }).syncAll = syncAll;
+}
+
+// 导出 stopAutoSync 供热重载使用
+export { stopAutoSync };

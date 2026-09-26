@@ -52,9 +52,7 @@ export async function renderSettings(root: HTMLElement) {
 
   function showStatus(msg: string, isError = false) {
     status.textContent = msg;
-    status.className = `text-sm text-center py-2 ${
-      isError ? 'text-red-600' : 'text-green-600'
-    }`;
+    status.className = `text-sm text-center py-2 ${isError ? 'text-red-600' : 'text-green-600'}`;
     status.classList.remove('hidden');
     setTimeout(() => status.classList.add('hidden'), 3000);
   }
@@ -82,34 +80,31 @@ export async function renderSettings(root: HTMLElement) {
     }
   });
 
-  root.querySelector<HTMLInputElement>('#import-input')!.addEventListener(
-    'change',
-    async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      const ok = await confirmDialog(root, {
-        title: '导入备份',
-        message: '导入会合并服务端数据（按 LWW 策略）。\n继续？',
-        confirmText: '继续导入',
-        cancelText: '取消',
-      });
-      if (!ok) return;
-      try {
-        const text = await file.text();
-        const json = JSON.parse(text);
-        const res = await api.post('/import', json);
-        if (res.ok) {
-          showStatus(`✓ 导入 ${(res.data as any)?.inserted || 0} 条`);
-          // 重新同步
-          await fullSync();
-        } else {
-          showStatus('导入失败：' + (res.error?.message || ''), true);
-        }
-      } catch (e) {
-        showStatus('导入失败：' + (e instanceof Error ? e.message : ''), true);
+  root.querySelector<HTMLInputElement>('#import-input')!.addEventListener('change', async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    const ok = await confirmDialog(root, {
+      title: '导入备份',
+      message: '导入会合并服务端数据（按 LWW 策略）。\n继续？',
+      confirmText: '继续导入',
+      cancelText: '取消',
+    });
+    if (!ok) return;
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      const res = await api.post('/import', json);
+      if (res.ok) {
+        showStatus(`✓ 导入 ${(res.data as any)?.inserted || 0} 条`);
+        // 重新同步
+        await fullSync();
+      } else {
+        showStatus('导入失败：' + (res.error?.message || ''), true);
       }
-    },
-  );
+    } catch (e) {
+      showStatus('导入失败：' + (e instanceof Error ? e.message : ''), true);
+    }
+  });
 
   root.querySelector<HTMLButtonElement>('#logout-btn')!.addEventListener('click', async () => {
     const ok = await confirmDialog(root, {

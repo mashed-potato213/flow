@@ -54,25 +54,46 @@ export async function syncPost(request: Request, env: D1Database): Promise<Respo
   };
 
   // 处理账户
-  await processEntity(env, 'accounts', body.accounts, sanitizeAccount, (rows) => {
-    result.accounts = rows;
-  }, (n) => {
-    result.skipped += n;
-  });
+  await processEntity(
+    env,
+    'accounts',
+    body.accounts,
+    sanitizeAccount,
+    (rows) => {
+      result.accounts = rows;
+    },
+    (n) => {
+      result.skipped += n;
+    },
+  );
 
   // 处理分类
-  await processEntity(env, 'categories', body.categories, sanitizeCategory, (rows) => {
-    result.categories = rows;
-  }, (n) => {
-    result.skipped += n;
-  });
+  await processEntity(
+    env,
+    'categories',
+    body.categories,
+    sanitizeCategory,
+    (rows) => {
+      result.categories = rows;
+    },
+    (n) => {
+      result.skipped += n;
+    },
+  );
 
   // 处理交易
-  await processEntity(env, 'transactions', body.transactions, sanitizeTransaction, (rows) => {
-    result.transactions = rows;
-  }, (n) => {
-    result.skipped += n;
-  });
+  await processEntity(
+    env,
+    'transactions',
+    body.transactions,
+    sanitizeTransaction,
+    (rows) => {
+      result.transactions = rows;
+    },
+    (n) => {
+      result.skipped += n;
+    },
+  );
 
   return ok(result);
 }
@@ -116,9 +137,10 @@ async function processEntity<T extends { id: string; last_modified: string }>(
 
   // 2. 拉取服务端这些 ID 的当前 last_modified（单次查询）
   const ids = validItems.map((i) => i.id);
-  const { results: serverRows } = await env.prepare(
-    `SELECT id, last_modified FROM ${entity} WHERE id IN (${ids.map(() => '?').join(',')})`,
-  )
+  const { results: serverRows } = await env
+    .prepare(
+      `SELECT id, last_modified FROM ${entity} WHERE id IN (${ids.map(() => '?').join(',')})`,
+    )
     .bind(...ids)
     .all<{ id: string; last_modified: string }>();
   const serverMap = new Map(serverRows.map((r) => [r.id, r.last_modified]));
@@ -151,9 +173,8 @@ async function processEntity<T extends { id: string; last_modified: string }>(
   }
 
   // 5. 返回这些 ID 的最新状态
-  const { results: finalRows } = await env.prepare(
-    `SELECT * FROM ${entity} WHERE id IN (${ids.map(() => '?').join(',')})`,
-  )
+  const { results: finalRows } = await env
+    .prepare(`SELECT * FROM ${entity} WHERE id IN (${ids.map(() => '?').join(',')})`)
     .bind(...ids)
     .all<T>();
   setResult(finalRows);
@@ -172,19 +193,16 @@ export async function syncGet(request: Request, env: D1Database): Promise<Respon
     if (!isNaN(d.getTime())) sinceTs = d.toISOString();
   }
 
-  const accounts = await env.prepare(
-    `SELECT * FROM accounts WHERE last_modified > ? ORDER BY last_modified ASC`,
-  )
+  const accounts = await env
+    .prepare(`SELECT * FROM accounts WHERE last_modified > ? ORDER BY last_modified ASC`)
     .bind(sinceTs)
     .all<Account>();
-  const categories = await env.prepare(
-    `SELECT * FROM categories WHERE last_modified > ? ORDER BY last_modified ASC`,
-  )
+  const categories = await env
+    .prepare(`SELECT * FROM categories WHERE last_modified > ? ORDER BY last_modified ASC`)
     .bind(sinceTs)
     .all<Category>();
-  const transactions = await env.prepare(
-    `SELECT * FROM transactions WHERE last_modified > ? ORDER BY last_modified ASC`,
-  )
+  const transactions = await env
+    .prepare(`SELECT * FROM transactions WHERE last_modified > ? ORDER BY last_modified ASC`)
     .bind(sinceTs)
     .all<Transaction>();
 

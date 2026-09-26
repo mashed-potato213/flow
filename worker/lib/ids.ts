@@ -13,13 +13,16 @@ export function ulid(): string {
   let time = '';
   let t = now;
   for (let i = 0; i < TIME_LEN; i++) {
-    time = ENCODING[t % ENCODING_LEN] + time;
+    const ch = ENCODING[t % ENCODING_LEN];
+    if (ch) time = ch + time;
     t = Math.floor(t / ENCODING_LEN);
   }
   const randomBytes = crypto.getRandomValues(new Uint8Array(RANDOM_LEN));
   let random = '';
   for (let i = 0; i < RANDOM_LEN; i++) {
-    random += ENCODING[randomBytes[i] % ENCODING_LEN];
+    const byte = randomBytes[i] ?? 0;
+    const ch = ENCODING[byte % ENCODING_LEN];
+    if (ch) random += ch;
   }
   return time + random;
 }

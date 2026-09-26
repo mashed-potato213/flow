@@ -1,6 +1,4 @@
 // 自定义确认对话框（替代浏览器原生 confirm）
-// 原生 confirm 在 PWA / 不同语言下按钮文案不可控（如"确定/禁止显示"），
-// 且无法匹配应用风格。这里用统一的 Tailwind 卡片样式。
 export interface ConfirmOptions {
   title?: string;
   message: string;
@@ -8,6 +6,18 @@ export interface ConfirmOptions {
   cancelText?: string;
   danger?: boolean;
 }
+
+interface PendingDialog {
+  overlay: HTMLElement;
+  resolve: (value: boolean) => void;
+  onKey: (e: KeyboardEvent) => void;
+}
+
+/**
+ * 当前所有未决对话框的注册表
+ * 当视图被销毁时调用 dismissAllDialogs() 清理所有未决 Promise
+ */
+const pendingDialogs = new Set<PendingDialog>();
 
 /**
  * 在指定容器内弹出确认对话框，返回 Promise<boolean>
@@ -49,10 +59,15 @@ export function confirmDialog(container: HTMLElement, opts: ConfirmOptions): Pro
     };
 
     function close(result: boolean) {
+      // 从注册表移除（避免重复清理）
+      pendingDialogs.delete(entry);
       overlay.remove();
       document.removeEventListener('keydown', onKey);
       resolve(result);
     }
+
+    const entry: PendingDialog = { overlay, resolve, onKey };
+    pendingDialogs.add(entry);
 
     overlay.addEventListener('click', (e) => {
       // 点遮罩 = 取消
@@ -75,14 +90,31 @@ export function confirmDialog(container: HTMLElement, opts: ConfirmOptions): Pro
 }
 
 /**
+ * 强制关闭所有未决对话框并以 false resolve
+ * 在视图销毁时（如路由切换）调用，防止 Promise 永远卡住
+ */
+export function dismissAllDialogs(): void {
+  for (const dialog of Array.from(pendingDialogs)) {
+    pendingDialogs.delete(dialog);
+    dialog.overlay.remove();
+    document.removeEventListener('keydown', dialog.onKey);
+    dialog.resolve(false);
+  }
+}
+
+/**
  * HTML 转义（避免 message 里特殊字符破坏 DOM）
  */
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[c] || c));
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c] || c,
+  );
 }

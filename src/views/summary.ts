@@ -9,7 +9,9 @@ import { formatMoney } from '../utils';
 import Chart from 'chart.js/auto';
 
 // 饼图实例持有：路由切换时统一销毁，避免内存泄漏
-let chartInstances: Chart[] = [];
+// 类型用宽口径 Chart（chart.js/auto 的类型），具体 doughnut chart 是其子类型
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let chartInstances: any[] = [];
 
 // 选中的月份（YYYY-MM）；空字符串表示本月（后端默认）
 let currentMonth = '';
@@ -64,13 +66,17 @@ const COLORS = [
  * HTML 转义
  */
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[c] || c));
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c] || c,
+  );
 }
 
 /**
@@ -78,7 +84,9 @@ function escapeHtml(s: string): string {
  */
 function shiftMonth(yyyymm: string, delta: number): string {
   const [y, m] = yyyymm.split('-').map(Number);
-  const newDate = new Date(y, (m - 1) + delta, 1);
+  const year = y ?? 0;
+  const month = m ?? 1;
+  const newDate = new Date(year, month - 1 + delta, 1);
   return `${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}`;
 }
 
@@ -114,9 +122,9 @@ export async function renderSummary(root: HTMLElement, params: Record<string, st
   const query = currentMonth ? `?month=${encodeURIComponent(currentMonth)}` : '';
   const res = await api.get<Summary>(`/summary${query}`);
   if (!res.ok || !res.data) {
-    content.innerHTML = `<div class="bg-white rounded-xl p-8 text-red-500 text-center">${
-      escapeHtml(res.error?.message || '加载失败')
-    }</div>`;
+    content.innerHTML = `<div class="bg-white rounded-xl p-8 text-red-500 text-center">${escapeHtml(
+      res.error?.message || '加载失败',
+    )}</div>`;
     bindTabBar(root); // 错误分支也要绑定 tab，否则 tab 无法切换
     return;
   }
@@ -188,12 +196,14 @@ export async function renderSummary(root: HTMLElement, params: Record<string, st
 /**
  * 触发月份切换并重新渲染
  */
-function navigateMonth(delta: number, root: HTMLElement) {
+function navigateMonth(delta: number, _root: HTMLElement) {
   // 当前显示的月份：优先用 currentMonth；为空则取本月
-  const base = currentMonth || (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  })();
+  const base =
+    currentMonth ||
+    (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    })();
   currentMonth = shiftMonth(base, delta);
   // 同步 hash（便于刷新 / 分享）
   location.hash = `#/summary?month=${currentMonth}`;

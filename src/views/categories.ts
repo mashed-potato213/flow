@@ -1,14 +1,9 @@
 // 分类管理视图（Day 3 完整实现）
 import { api } from '../api';
 import { confirmDialog } from './confirm';
-
-interface Category {
-  id: string;
-  name: string;
-  icon: string | null;
-  scope: 'expense' | 'income' | 'finance';
-  is_preset: number;
-}
+import { mutateAndQueue } from '../offlineStore';
+import { ulid } from 'ulid';
+import type { Category } from '../api-types';
 
 const SCOPE_LABELS: Record<string, { label: string; emoji: string }> = {
   expense: { label: '支出', emoji: '🛒' },
@@ -20,13 +15,17 @@ const SCOPE_LABELS: Record<string, { label: string; emoji: string }> = {
  * HTML 转义，防止 XSS
  */
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[c] || c));
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c] || c,
+  );
 }
 
 export async function renderCategories(root: HTMLElement) {
@@ -58,22 +57,27 @@ export async function renderCategories(root: HTMLElement) {
 
     // 按 scope 分组
     const groups: Record<string, Category[]> = { expense: [], income: [], finance: [] };
-    res.data.forEach((c) => groups[c.scope].push(c));
+    res.data.forEach((c) => {
+      const list = groups[c.scope];
+      if (list) list.push(c);
+    });
 
     content.innerHTML = Object.entries(SCOPE_LABELS)
-      .map(
-        ([scope, { label, emoji }]) => `
+      .map(([scope, { label, emoji }]) => {
+        const list = groups[scope] ?? [];
+        return `
       <div class="mb-6">
         <h2 class="text-sm font-bold text-gray-700 mb-2 flex items-center">
           <span class="mr-2">${emoji}</span>${label}
-          <span class="ml-auto text-xs text-gray-400 font-normal">${groups[scope].length}</span>
+          <span class="ml-auto text-xs text-gray-400 font-normal">${list.length}</span>
         </h2>
         <div class="bg-white rounded-xl overflow-hidden">
-          ${groups[scope].length === 0
-            ? `<div class="p-4 text-center text-gray-400 text-sm">暂无</div>`
-            : groups[scope]
-                .map(
-                  (c) => `
+          ${
+            list.length === 0
+              ? `<div class="p-4 text-center text-gray-400 text-sm">暂无</div>`
+              : list
+                  .map(
+                    (c) => `
               <div class="flex items-center px-4 py-3 border-b border-gray-100 last:border-b-0">
                 <span class="text-xl mr-3">${escapeHtml(c.icon || '•')}</span>
                 <span class="flex-1 text-gray-900">${escapeHtml(c.name)}</span>
@@ -82,12 +86,13 @@ export async function renderCategories(root: HTMLElement) {
                 ${c.is_preset ? '' : `<button class="delete-btn text-red-500 text-sm" data-id="${c.id}">删除</button>`}
               </div>
             `,
-                )
-                .join('')}
+                  )
+                  .join('')
+          }
         </div>
       </div>
-    `,
-      )
+    `;
+      })
       .join('');
 
     content.querySelectorAll<HTMLButtonElement>('.edit-btn').forEach((btn) => {
@@ -110,8 +115,8 @@ export async function renderCategories(root: HTMLElement) {
           danger: true,
         });
         if (!ok) return;
-        const del = await api.del(`/categories/${id}`);
-        if (del.ok) {
+        const del = await mutateAndQueue('categories', 'delete', target);
+        if (del.ok || del.queued) {
           load();
         } else {
           alert(del.error?.message || '删除失败');
@@ -166,25 +171,38 @@ export async function renderCategories(root: HTMLElement) {
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const nameInput = (modalContainer.querySelector('#name') as unknown) as HTMLInputElement;
-      const iconInput = (modalContainer.querySelector('#icon') as unknown) as HTMLInputElement;
-      const scopeSelect = (modalContainer.querySelector('#scope') as unknown) as HTMLSelectElement;
+      const nameInput = modalContainer.querySelector('#name') as unknown as HTMLInputElement;
+      const iconInput = modalContainer.querySelector('#icon') as unknown as HTMLInputElement;
+      const scopeSelect = modalContainer.querySelector('#scope') as unknown as HTMLSelectElement;
 
       const payload = {
         name: nameInput.value.trim(),
         icon: iconInput.value.trim() || null,
-        scope: scopeSelect.value,
+        scope: scopeSelect.value as Category['scope'],
       };
 
       const submitBtn = form.querySelector<HTMLButtonElement>('button[type=submit]')!;
       submitBtn.disabled = true;
       submitBtn.textContent = '保存中...';
 
-      const res = isEdit
-        ? await api.put(`/categories/${category!.id}`, payload)
-        : await api.post('/categories', payload);
+      const now = new Date().toISOString();
+      const row: Category = isEdit
+        ? { ...category!, ...payload, updated_at: now, last_modified: now }
+        : {
+            id: ulid(),
+            name: payload.name,
+            icon: payload.icon,
+            scope: payload.scope,
+            is_preset: 0,
+            created_at: now,
+            updated_at: now,
+            last_modified: now,
+            deleted: 0,
+          };
 
-      if (res.ok) {
+      const res = await mutateAndQueue('categories', isEdit ? 'update' : 'create', row);
+
+      if (res.ok || res.queued) {
         modalContainer.innerHTML = '';
         load();
       } else {

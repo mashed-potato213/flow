@@ -5,17 +5,7 @@ import { mutateAndQueue } from '../offlineStore';
 import { confirmDialog } from './confirm';
 import { ulid } from 'ulid';
 import Sortable from 'sortablejs';
-
-interface Account {
-  id: string;
-  name: string;
-  type: 'payment_channel' | 'asset_holding';
-  is_payment_capable: number;
-  opening_balance: number;
-  sort_order: number;
-  balance?: number;
-  created_at: string;
-}
+import type { Account, AccountWithBalance } from '../api-types';
 
 /**
  * 账户标签（简短展示）
@@ -30,13 +20,17 @@ function accountLabel(a: { type: string; is_payment_capable?: number }): string 
  * HTML 转义
  */
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[c] || c));
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c] || c,
+  );
 }
 
 export async function renderAccounts(root: HTMLElement) {
@@ -63,7 +57,7 @@ export async function renderAccounts(root: HTMLElement) {
 
   async function load() {
     content.innerHTML = `<div class="text-center py-12 text-gray-400">加载中...</div>`;
-    const res = await api.get<Account[]>('/accounts');
+    const res = await api.get<AccountWithBalance[]>('/accounts');
     if (!res.ok || !res.data) {
       content.innerHTML = `<div class="bg-red-50 text-red-600 p-4 rounded-lg">${escapeHtml(res.error?.message || '加载失败')}</div>`;
       return;
@@ -100,9 +94,11 @@ export async function renderAccounts(root: HTMLElement) {
               <div class="text-xs text-gray-500 mt-1">
                 <span class="inline-block px-2 py-0.5 bg-gray-100 rounded">${accountLabel(a)}</span>
                 <span class="ml-2">余额 <span class="text-gray-900 font-medium">${formatMoney(a.balance ?? a.opening_balance)}</span></span>
-                ${a.balance !== undefined && a.balance !== a.opening_balance
-                  ? `<span class="ml-1 text-gray-400">（期初 ${formatMoney(a.opening_balance)}）</span>`
-                  : ''}
+                ${
+                  a.balance !== undefined && a.balance !== a.opening_balance
+                    ? `<span class="ml-1 text-gray-400">（期初 ${formatMoney(a.opening_balance)}）</span>`
+                    : ''
+                }
               </div>
             </div>
             <button class="edit-btn text-primary text-sm mr-3" data-id="${a.id}">编辑</button>
@@ -123,7 +119,7 @@ export async function renderAccounts(root: HTMLElement) {
       sortableInstance = Sortable.create(listEl, {
         animation: 150,
         handle: '.drag-handle', // 仅手柄可拖
-        delay: 150,            // 移动端长按 150ms 触发，避免误触
+        delay: 150, // 移动端长按 150ms 触发，避免误触
         delayOnTouchOnly: true,
         onEnd: async () => {
           const ids = Array.from(listEl.children).map((el) => (el as HTMLElement).dataset.id!);
@@ -212,10 +208,10 @@ export async function renderAccounts(root: HTMLElement) {
       </div>
     `;
 
-    const form = modalContainer.querySelector<HTMLFormElement>('#account-form')!;
-    const cancelBtn = modalContainer.querySelector<HTMLButtonElement>('#cancel-btn')!;
-    const typeSelect = modalContainer.querySelector<HTMLSelectElement>('#type')!;
-    const paymentWrap = modalContainer.querySelector<HTMLDivElement>('#payment-toggle-wrap')!;
+    const form = modalContainer.querySelector('#account-form') as HTMLFormElement;
+    const cancelBtn = modalContainer.querySelector('#cancel-btn') as HTMLButtonElement;
+    const typeSelect = modalContainer.querySelector('#type') as unknown as HTMLSelectElement;
+    const paymentWrap = modalContainer.querySelector('#payment-toggle-wrap') as HTMLDivElement;
 
     typeSelect.addEventListener('change', () => {
       if (typeSelect.value === 'asset_holding') {
@@ -232,18 +228,22 @@ export async function renderAccounts(root: HTMLElement) {
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const nameInput = modalContainer.querySelector<HTMLInputElement>('#name')!;
-      const balanceInput = modalContainer.querySelector<HTMLInputElement>('#opening_balance')!;
-      const paymentCheckbox = modalContainer.querySelector<HTMLInputElement>('#is_payment_capable')!;
+      const nameInput = modalContainer.querySelector('#name') as HTMLInputElement;
+      const balanceInput = modalContainer.querySelector('#opening_balance') as HTMLInputElement;
+      const paymentCheckbox = modalContainer.querySelector(
+        '#is_payment_capable',
+      ) as HTMLInputElement;
 
+      const isPaymentCapable: 0 | 1 =
+        typeSelect.value === 'asset_holding' ? (paymentCheckbox.checked ? 1 : 0) : 1;
       const payload = {
         name: nameInput.value.trim(),
         type: typeSelect.value,
-        is_payment_capable: typeSelect.value === 'asset_holding' ? (paymentCheckbox.checked ? 1 : 0) : 1,
+        is_payment_capable: isPaymentCapable,
         opening_balance: parseFloat(balanceInput.value || '0'),
       };
 
-      const submitBtn = form.querySelector<HTMLButtonElement>('button[type=submit]')!;
+      const submitBtn = form.querySelector('button[type=submit]') as HTMLButtonElement;
       submitBtn.disabled = true;
       submitBtn.textContent = '保存中...';
 
@@ -256,7 +256,10 @@ export async function renderAccounts(root: HTMLElement) {
         opening_balance: payload.opening_balance,
         sort_order: account?.sort_order ?? Date.now(),
         created_at: account?.created_at || now,
-      } as Account;
+        updated_at: now,
+        last_modified: now,
+        deleted: 0,
+      };
 
       const res = await mutateAndQueue('accounts', isEdit ? 'update' : 'create', row);
 

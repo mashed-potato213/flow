@@ -1,5 +1,5 @@
 // 鉴权路由：status / setup / login / logout
-import { ok, fail, setCookie, clearCookie } from '../lib/response';
+import { fail, setCookie, clearCookie } from '../lib/response';
 import {
   hashPassword,
   verifyPassword,
@@ -10,14 +10,16 @@ import {
   setPasswordHash,
   readTokenFromRequest,
 } from '../auth';
+import { PasswordSchema } from '../../shared/schemas';
+import { checkRateLimit, recordFailure, clearFailures } from '../lib/rateLimit';
 
 const COOKIE_NAME = 'flow_token';
 const COOKIE_MAX_AGE = 365 * 24 * 60 * 60; // 1 年（秒）
 
-function cookieHeaders(value: string | null): Headers {
+function cookieHeaders(value: string | null, request: Request): Headers {
   const headers = new Headers({ 'Content-Type': 'application/json' });
   if (value) {
-    headers.append('Set-Cookie', setCookie(COOKIE_NAME, value, COOKIE_MAX_AGE));
+    headers.append('Set-Cookie', setCookie(COOKIE_NAME, value, COOKIE_MAX_AGE, request));
   } else {
     headers.append('Set-Cookie', clearCookie(COOKIE_NAME));
   }
@@ -30,10 +32,9 @@ function cookieHeaders(value: string | null): Headers {
  */
 export async function status(env: D1Database): Promise<Response> {
   const setup = await isPasswordSetup(env);
-  return new Response(
-    JSON.stringify({ ok: true, data: { setup } }),
-    { headers: { 'Content-Type': 'application/json' } },
-  );
+  return new Response(JSON.stringify({ ok: true, data: { setup } }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 /**
@@ -44,17 +45,26 @@ export async function setup(request: Request, env: D1Database): Promise<Response
   if (await isPasswordSetup(env)) {
     return fail('ALREADY_SETUP', '密码已设置', 409);
   }
+
+  // 限流检查（防爆破）
+  const limited = await checkRateLimit(env);
+  if (limited) return limited;
+
   const body = (await request.json().catch(() => ({}))) as { password?: string };
-  if (!body.password || body.password.length < 6) {
-    return fail('INVALID_PASSWORD', '密码至少 6 个字符');
+  const parsed = PasswordSchema.safeParse(body.password);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return fail('INVALID_PASSWORD', issue ? issue.message : '密码不符合要求');
   }
-  const hash = await hashPassword(body.password);
+
+  const hash = await hashPassword(parsed.data);
   await setPasswordHash(env, hash);
   const token = await createSession(env);
-  return new Response(
-    JSON.stringify({ ok: true, data: { token } }),
-    { headers: cookieHeaders(token) },
-  );
+  await clearFailures(env);
+
+  return new Response(JSON.stringify({ ok: true, data: { token } }), {
+    headers: cookieHeaders(token, request),
+  });
 }
 
 /**
@@ -62,17 +72,27 @@ export async function setup(request: Request, env: D1Database): Promise<Response
  * 登录
  */
 export async function login(request: Request, env: D1Database): Promise<Response> {
+  // 限流检查（防爆破）
+  const limited = await checkRateLimit(env);
+  if (limited) return limited;
+
   const body = (await request.json().catch(() => ({}))) as { password?: string };
   if (!body.password) return fail('INVALID_PASSWORD', '请输入密码');
+
   const hash = await getPasswordHash(env);
   if (!hash) return fail('NOT_SETUP', '尚未设置密码', 400);
+
   const valid = await verifyPassword(body.password, hash);
-  if (!valid) return fail('WRONG_PASSWORD', '密码错误', 401);
+  if (!valid) {
+    const count = await recordFailure(env);
+    return fail('WRONG_PASSWORD', `密码错误（${count}/10 次）`, 401);
+  }
+
+  await clearFailures(env);
   const token = await createSession(env);
-  return new Response(
-    JSON.stringify({ ok: true, data: { token } }),
-    { headers: cookieHeaders(token) },
-  );
+  return new Response(JSON.stringify({ ok: true, data: { token } }), {
+    headers: cookieHeaders(token, request),
+  });
 }
 
 /**
@@ -82,8 +102,7 @@ export async function login(request: Request, env: D1Database): Promise<Response
 export async function logout(request: Request, env: D1Database): Promise<Response> {
   const token = readTokenFromRequest(request);
   if (token) await deleteSession(env, token);
-  return new Response(
-    JSON.stringify({ ok: true, data: null }),
-    { headers: cookieHeaders(null) },
-  );
+  return new Response(JSON.stringify({ ok: true, data: null }), {
+    headers: cookieHeaders(null, request),
+  });
 }

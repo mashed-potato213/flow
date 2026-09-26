@@ -1,58 +1,24 @@
-// 共享类型定义
+// 后端类型层：所有实体类型从 shared/schemas 重新导出
+// 这样后端代码可以继续 import { Account } from '../lib/types'
+// 但类型实际定义在 shared/，确保前后端完全一致。
+
+export type {
+  Account,
+  AccountType,
+  Category,
+  CategoryScope,
+  Transaction,
+  TransactionType,
+  NewAccount,
+  NewCategory,
+  NewTransaction,
+  SyncRequest,
+  Password,
+} from '../../shared/schemas';
+
+// Cloudflare Workers 环境绑定
 export interface Env {
   DB: D1Database;
   BACKUPS: R2Bucket;
   ASSETS: Fetcher;
-}
-
-export type AccountType = 'payment_channel' | 'asset_holding';
-export type CategoryScope = 'expense' | 'income' | 'finance';
-export type TransactionType = 'income' | 'expense' | 'transfer' | 'adjustment';
-
-export interface Account {
-  id: string;
-  name: string;
-  type: AccountType;
-  is_payment_capable: number; // 0/1：是否可作为支付渠道（用于余额宝等混合账户）
-  opening_balance: number;
-  sort_order: number; // 拖拽排序用
-  balance?: number; // 当前余额（仅 listAccounts 返回时存在）
-  created_at: string;
-  updated_at: string;
-  last_modified: string;
-  deleted: number;
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  icon: string | null;
-  scope: CategoryScope;
-  is_preset: number;
-  created_at: string;
-  updated_at: string;
-  last_modified: string;
-  deleted: number;
-}
-
-export interface Transaction {
-  id: string;
-  date: string;
-  amount: number;
-  type: TransactionType;
-  account_id: string;
-  target_account_id: string | null;
-  category_id: string | null;
-  note: string | null;
-  created_at: string;
-  updated_at: string;
-  last_modified: string;
-  deleted: number;
-}
-
-export interface Session {
-  token: string;
-  created_at: string;
-  expires_at: string;
-  last_used_at: string;
 }

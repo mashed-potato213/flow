@@ -4,6 +4,7 @@ import { api } from '../api';
 import { renderTabBar, bindTabBar } from './tabbar';
 import { confirmDialog } from './confirm';
 import { formatMoney, signColor, signPrefix, debounce } from '../utils';
+import { mutateAndQueue } from '../offlineStore';
 import type { Transaction, Account, Category } from '../api-types';
 
 interface Filters {
@@ -19,13 +20,17 @@ interface Filters {
  * HTML 转义
  */
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[c] || c));
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c] || c,
+  );
 }
 
 export async function renderList(root: HTMLElement) {
@@ -74,9 +79,9 @@ export async function renderList(root: HTMLElement) {
       console.error('loadData failed:', e);
       const content = root.querySelector<HTMLDivElement>('#tx-list');
       if (content) {
-        content.innerHTML = `<div class="bg-white rounded-xl p-4 text-red-500 text-sm">${
-          escapeHtml(e instanceof Error ? e.message : '加载异常')
-        }</div>`;
+        content.innerHTML = `<div class="bg-white rounded-xl p-4 text-red-500 text-sm">${escapeHtml(
+          e instanceof Error ? e.message : '加载异常',
+        )}</div>`;
       }
     }
   }
@@ -95,9 +100,9 @@ export async function renderList(root: HTMLElement) {
     const content = root.querySelector<HTMLDivElement>('#tx-list');
     if (!content) return;
     if (!res.ok || !res.data) {
-      content.innerHTML = `<div class="text-center text-red-500 py-8">${
-        escapeHtml(res.error?.message || '加载失败')
-      }</div>`;
+      content.innerHTML = `<div class="text-center text-red-500 py-8">${escapeHtml(
+        res.error?.message || '加载失败',
+      )}</div>`;
       return;
     }
     transactions = res.data;
@@ -178,14 +183,20 @@ export async function renderList(root: HTMLElement) {
       }, 300),
     );
 
-    (root.querySelector('#filter-type') as unknown as HTMLSelectElement).addEventListener('change', (e) => {
-      filters.type = (e.target as HTMLSelectElement).value;
-      loadTransactions();
-    });
-    (root.querySelector('#filter-account') as unknown as HTMLSelectElement).addEventListener('change', (e) => {
-      filters.account = (e.target as HTMLSelectElement).value;
-      loadTransactions();
-    });
+    (root.querySelector('#filter-type') as unknown as HTMLSelectElement).addEventListener(
+      'change',
+      (e) => {
+        filters.type = (e.target as HTMLSelectElement).value;
+        loadTransactions();
+      },
+    );
+    (root.querySelector('#filter-account') as unknown as HTMLSelectElement).addEventListener(
+      'change',
+      (e) => {
+        filters.account = (e.target as HTMLSelectElement).value;
+        loadTransactions();
+      },
+    );
     (root.querySelector('#filter-category') as unknown as HTMLSelectElement).addEventListener(
       'change',
       (e) => {
@@ -227,8 +238,7 @@ export async function renderList(root: HTMLElement) {
       content.innerHTML = `<div class="bg-white rounded-xl py-12 text-gray-400">暂无记录</div>`;
       return;
     }
-    const accountName = (id: string) =>
-      accounts.find((a) => a.id === id)?.name || '?';
+    const accountName = (id: string) => accounts.find((a) => a.id === id)?.name || '?';
     const categoryName = (id: string | null) =>
       id ? categories.find((c) => c.id === id)?.name || '?' : '';
 
@@ -285,19 +295,13 @@ export async function renderList(root: HTMLElement) {
           <div class="flex items-baseline text-sm">
             <span class="font-medium text-gray-900">${
               categoryName(t.category_id) ||
-              (t.type === 'transfer'
-                ? '转账'
-                : t.type === 'adjustment'
-                  ? '市值'
-                  : '')
+              (t.type === 'transfer' ? '转账' : t.type === 'adjustment' ? '市值' : '')
             }</span>
             <span class="ml-2 text-xs text-gray-400">${escapeHtml(t.date)}</span>
           </div>
           <div class="text-xs text-gray-500 mt-1 truncate text-left">
             ${escapeHtml(accountName(t.account_id))}${
-              t.target_account_id
-                ? ' → ' + escapeHtml(accountName(t.target_account_id))
-                : ''
+              t.target_account_id ? ' → ' + escapeHtml(accountName(t.target_account_id)) : ''
             }
             ${t.note ? ' · ' + escapeHtml(t.note) : ''}
           </div>
@@ -325,9 +329,13 @@ export async function renderList(root: HTMLElement) {
           danger: true,
         });
         if (!ok) return;
-        const res = await api.del(`/transactions/${id}`);
-        if (res.ok) loadTransactions();
-        else alert(res.error?.message || '删除失败');
+        // 走离线队列：断网时入队，联网后自动同步
+        const res = await mutateAndQueue('transactions', 'delete', tx);
+        if (res.ok || res.queued) {
+          loadTransactions();
+        } else {
+          alert(res.error?.message || '删除失败');
+        }
       });
     });
   }

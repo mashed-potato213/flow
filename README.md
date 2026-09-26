@@ -17,24 +17,26 @@
 
 ## 🛠️ 技术栈
 
-| 层 | 选型 |
-|---|---|
-| 前端 | Vite + Vanilla TS + Tailwind CSS + vite-plugin-pwa |
-| 图表 | Chart.js（饼图） |
-| 离线存储 | IndexedDB（Dexie.js） |
-| 后端 | Cloudflare Workers（TypeScript） |
-| 数据库 | Cloudflare D1（SQLite） |
-| 备份 | Cloudflare R2 |
-| 鉴权 | PBKDF2-SHA256 (100k) + httpOnly cookie + token |
+| 层       | 选型                                               |
+| -------- | -------------------------------------------------- |
+| 前端     | Vite + Vanilla TS + Tailwind CSS + vite-plugin-pwa |
+| 图表     | Chart.js（饼图）                                   |
+| 离线存储 | IndexedDB（Dexie.js）                              |
+| 后端     | Cloudflare Workers（TypeScript）                   |
+| 数据库   | Cloudflare D1（SQLite）                            |
+| 备份     | Cloudflare R2                                      |
+| 鉴权     | PBKDF2-SHA256 (100k) + httpOnly cookie + token     |
 
 ## 💻 本地开发
 
 ### 1. 安装依赖
+
 ```powershell
 npm install
 ```
 
 ### 2. 本地数据库迁移
+
 ```powershell
 # 初始化本地 D1
 npx wrangler d1 migrations apply flow-db --local
@@ -45,11 +47,13 @@ npx wrangler d1 migrations apply flow-db --local
 需要两个终端：
 
 终端 A（Vite 前端开发，端口 5173）：
+
 ```powershell
 npm run dev
 ```
 
 终端 B（Wrangler 后端模拟，端口 8787）：
+
 ```powershell
 npx wrangler dev
 ```
@@ -67,38 +71,48 @@ npx wrangler dev
 ## 🚀 部署到 Cloudflare
 
 ### 前置要求
+
 - Cloudflare 账号（免费）
 - GitHub 账号
 - 已安装 Node.js 18+
 
 ### 步骤 1：登录 Cloudflare
+
 ```powershell
 npx wrangler login
 ```
+
 浏览器会打开 Cloudflare 登录页，授权即可。
 
 ### 步骤 2：创建 D1 数据库
+
 ```powershell
 npx wrangler d1 create flow-db
 ```
+
 输出形如：
+
 ```
 ✅ Successfully created DB 'flow-db'
 database_id = "abcd1234-5678-90ab-cdef-1234567890ab"
 ```
+
 **把 `database_id` 填到 `wrangler.toml` 的 `[[d1_databases]]` 段。**
 
 ### 步骤 3：创建 R2 Bucket
+
 ```powershell
 npx wrangler r2 bucket create flow-backups
 ```
 
 ### 步骤 4：应用数据库迁移（远程）
+
 ```powershell
 npx wrangler d1 migrations apply flow-db --remote
 ```
 
 ### 步骤 5：推送到 GitHub
+
 ```powershell
 git init
 git add .
@@ -120,6 +134,7 @@ git push -u origin main
 推送后 GitHub Actions 自动运行（`.github/workflows/deploy.yml`）。
 
 也可以手动部署：
+
 ```powershell
 npm run deploy
 ```
@@ -129,9 +144,11 @@ npm run deploy
 ### 步骤 8：配置 Cron Trigger
 
 到 Cloudflare Dashboard → Workers → flow → Triggers → Cron Triggers：
+
 - Cron: `0 3 * * *`（UTC 3:00 = 北京时间 11:00）
 
 或通过命令行：
+
 ```powershell
 npx wrangler triggers deploy
 ```

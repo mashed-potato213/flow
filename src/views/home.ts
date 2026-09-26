@@ -4,6 +4,8 @@
 import { api } from '../api';
 import { renderTabBar, bindTabBar } from './tabbar';
 import { formatDate } from '../utils';
+import { mutateAndQueue } from '../offlineStore';
+import { ulid } from 'ulid';
 import type { Account, Category, TransactionType } from '../api-types';
 
 const TYPES: { value: TransactionType; label: string; emoji: string }[] = [
@@ -17,13 +19,17 @@ const TYPES: { value: TransactionType; label: string; emoji: string }[] = [
  * HTML 转义
  */
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[c] || c));
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[c] || c,
+  );
 }
 
 /**
@@ -38,14 +44,27 @@ function categoryScopeFor(type: TransactionType): 'expense' | 'income' | 'financ
 
 /**
  * 账户筛选辅助函数
- * - 可支付账户：用于支出/收入/转账（payment_channel 或 asset_holding + is_payment_capable）
+ * - 可支付账户：用于支出/收入（payment_channel 或 asset_holding + is_payment_capable）
  * - 理财账户：用于市值调整（asset_holding）
+ * - 转账场景：全部账户（含纯理财账户），理财间转账也很常见
  */
 function payableAccounts(accounts: Account[]): Account[] {
   return accounts.filter((a) => a.type === 'payment_channel' || a.is_payment_capable === 1);
 }
 function holdingAccounts(accounts: Account[]): Account[] {
   return accounts.filter((a) => a.type === 'asset_holding');
+}
+function allAccounts(accounts: Account[]): Account[] {
+  return accounts;
+}
+
+/**
+ * 账户下拉项的标签：转账时显示类型以便区分
+ */
+function accountOptionLabel(a: Account, showType: boolean): string {
+  const name = escapeHtml(a.name);
+  if (!showType) return name;
+  return `${name} (${a.type === 'payment_channel' ? '支付' : '理财'})`;
 }
 
 export async function renderHome(root: HTMLElement) {
@@ -122,12 +141,18 @@ export async function renderHome(root: HTMLElement) {
             }</label>
             <select id="account" class="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:border-primary">
               <option value="">请选择</option>
-              ${(selectedType === 'adjustment' ? holdingAccounts(accounts) : payableAccounts(accounts))
+              ${(selectedType === 'adjustment'
+                ? holdingAccounts(accounts)
+                : selectedType === 'transfer'
+                ? allAccounts(accounts)
+                : payableAccounts(accounts)
+              )
                 .map(
                   (a) =>
-                    `<option value="${a.id}">${escapeHtml(a.name)} (${
-                      a.type === 'payment_channel' ? '支付' : '理财'
-                    })</option>`,
+                    `<option value="${a.id}">${accountOptionLabel(
+                      a,
+                      selectedType === 'transfer',
+                    )}</option>`,
                 )
                 .join('')}
             </select>
@@ -140,8 +165,8 @@ export async function renderHome(root: HTMLElement) {
               <label class="block text-sm text-gray-600 mb-2">到账户</label>
               <select id="target-account" class="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:border-primary">
                 <option value="">请选择</option>
-              ${payableAccounts(accounts)
-                .map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`)
+              ${allAccounts(accounts)
+                .map((a) => `<option value="${a.id}">${accountOptionLabel(a, true)}</option>`)
                 .join('')}
               </select>
             </div>
@@ -158,8 +183,7 @@ export async function renderHome(root: HTMLElement) {
                 <option value="">请选择</option>
                 ${filteredCats
                   .map(
-                    (c) =>
-                      `<option value="${c.id}">${c.icon || ''} ${escapeHtml(c.name)}</option>`,
+                    (c) => `<option value="${c.id}">${c.icon || ''} ${escapeHtml(c.name)}</option>`,
                   )
                   .join('')}
               </select>
@@ -200,7 +224,40 @@ export async function renderHome(root: HTMLElement) {
     `;
 
     bindEvents();
+    bindTransferAccountLinkage();
     bindTabBar(root);
+  }
+
+  /**
+   * 转账双向联动：选了"从账户"后，目标账户里同账户灰显且不可选；
+   * 反之亦然。若变更后两侧撞车，自动清空后选的那一侧。
+   */
+  function bindTransferAccountLinkage() {
+    if (selectedType !== 'transfer') return;
+    const fromSelect = root.querySelector('#account') as HTMLSelectElement | null;
+    const toSelect = root.querySelector('#target-account') as HTMLSelectElement | null;
+    if (!fromSelect || !toSelect) return;
+
+    const sync = (changed: 'from' | 'to') => {
+      const fromId = fromSelect.value;
+      const toId = toSelect.value;
+      // 重置两个下拉的 disabled 状态
+      Array.from(fromSelect.options).forEach((opt) => {
+        opt.disabled = !!opt.value && opt.value === toId;
+      });
+      Array.from(toSelect.options).forEach((opt) => {
+        opt.disabled = !!opt.value && opt.value === fromId;
+      });
+      // 若变更后撞车（用户先选 to=A，再选 from=A），清空后选的那一侧
+      if (changed === 'from' && fromId && fromId === toId) {
+        toSelect.value = '';
+      } else if (changed === 'to' && toId && toId === fromId) {
+        fromSelect.value = '';
+      }
+    };
+
+    fromSelect.addEventListener('change', () => sync('from'));
+    toSelect.addEventListener('change', () => sync('to'));
   }
 
   function bindEvents() {
@@ -269,6 +326,10 @@ export async function renderHome(root: HTMLElement) {
         showError('请选择目标账户');
         return;
       }
+      if (selectedType === 'transfer' && account === targetAccount) {
+        showError('"从账户"和"到账户"不能是同一个账户');
+        return;
+      }
       if (selectedType !== 'transfer' && !category) {
         showError('请选择分类');
         return;
@@ -291,14 +352,31 @@ export async function renderHome(root: HTMLElement) {
       }
 
       try {
-        const res = await api.post('/transactions', payload);
-        if (res.ok) {
+        // 构造完整 Transaction 行（mutateAndQueue 需要 id + 时间戳）
+        const now = new Date().toISOString();
+        const newTx: import('../api-types').Transaction = {
+          id: ulid(),
+          date: payload.date,
+          amount: payload.amount,
+          type: payload.type,
+          account_id: payload.account_id,
+          target_account_id: payload.target_account_id ?? null,
+          category_id: payload.category_id ?? null,
+          note: payload.note ?? null,
+          created_at: now,
+          updated_at: now,
+          last_modified: now,
+          deleted: 0,
+        };
+
+        const res = await mutateAndQueue('transactions', 'create', newTx);
+        if (res.ok || res.queued) {
           // 清空表单
           (root.querySelector('#amount') as HTMLInputElement).value = '';
           (root.querySelector('#note') as HTMLInputElement).value = '';
-          saveBtn.textContent = '✓ 已保存';
+          saveBtn.textContent = res.queued ? '✓ 已离线保存' : '✓ 已保存';
           setTimeout(() => {
-            if (saveBtn.textContent === '✓ 已保存') saveBtn.textContent = '保存';
+            if (saveBtn.textContent?.startsWith('✓')) saveBtn.textContent = '保存';
             saveBtn.disabled = false;
           }, 1000);
         } else {

@@ -1,20 +1,22 @@
 // 交易路由：list / get / create / update / delete
-// 鉴权由 index.ts 的统一中间件处理，这里只负责业务逻辑
 import { ok, fail } from '../lib/response';
 import { ulid, nowIso } from '../lib/ids';
+import { NewTransactionSchema, NewTransactionBaseSchema } from '../../shared/schemas';
 import type { Transaction, TransactionType } from '../lib/types';
 
 const VALID_TYPES: TransactionType[] = ['income', 'expense', 'transfer', 'adjustment'];
+const MAX_LIMIT = 500;
+const DEFAULT_LIMIT = 100;
+
+/**
+ * 转义 LIKE 通配符（用户输入的 % 和 _ 需要转义，否则会被当作通配符）
+ */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, '\\$&');
+}
 
 /**
  * GET /api/transactions
- * 查询参数：
- *   - account     账户 ID（同时匹配 account_id 与 target_account_id）
- *   - category    分类 ID
- *   - type        类型（income/expense/transfer/adjustment）
- *   - start/end   日期范围 YYYY-MM-DD
- *   - q           备注模糊搜索
- *   - limit/offset 分页（默认 100/0，limit 上限 500）
  */
 export async function listTransactions(request: Request, env: D1Database): Promise<Response> {
   const url = new URL(request.url);
@@ -24,11 +26,15 @@ export async function listTransactions(request: Request, env: D1Database): Promi
   const start = url.searchParams.get('start');
   const end = url.searchParams.get('end');
   const q = url.searchParams.get('q');
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '100'), 500);
-  const offset = parseInt(url.searchParams.get('offset') || '0');
+
+  const rawLimit = parseInt(url.searchParams.get('limit') || String(DEFAULT_LIMIT), 10);
+  const limit =
+    Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, MAX_LIMIT) : DEFAULT_LIMIT;
+  const rawOffset = parseInt(url.searchParams.get('offset') || '0', 10);
+  const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
 
   const where: string[] = ['deleted = 0'];
-  const params: any[] = [];
+  const params: unknown[] = [];
 
   if (account) {
     where.push('(account_id = ? OR target_account_id = ?)');
@@ -51,13 +57,17 @@ export async function listTransactions(request: Request, env: D1Database): Promi
     params.push(end);
   }
   if (q) {
-    where.push('note LIKE ?');
-    params.push(`%${q}%`);
+    // 转义 LIKE 通配符，防信息泄露扫描
+    where.push("note LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLike(q)}%`);
   }
 
   const sql = `SELECT * FROM transactions WHERE ${where.join(' AND ')} ORDER BY date DESC, last_modified DESC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
-  const { results } = await env.prepare(sql).bind(...params).all<Transaction>();
+  const { results } = await env
+    .prepare(sql)
+    .bind(...params)
+    .all<Transaction>();
   return ok(results);
 }
 
@@ -65,7 +75,8 @@ export async function listTransactions(request: Request, env: D1Database): Promi
  * GET /api/transactions/:id
  */
 export async function getTransaction(env: D1Database, id: string): Promise<Response> {
-  const row = await env.prepare('SELECT * FROM transactions WHERE id = ? AND deleted = 0')
+  const row = await env
+    .prepare('SELECT * FROM transactions WHERE id = ? AND deleted = 0')
     .bind(id)
     .first<Transaction>();
   if (!row) return fail('NOT_FOUND', '交易不存在', 404);
@@ -73,53 +84,42 @@ export async function getTransaction(env: D1Database, id: string): Promise<Respo
 }
 
 /**
- * 校验交易 payload
- */
-function validateTransactionPayload(body: Partial<Transaction>): string | null {
-  if (!body.date || !/^\d{4}-\d{2}-\d{2}$/.test(body.date)) return '日期格式错误';
-  if (typeof body.amount !== 'number' || body.amount <= 0) return '金额必须为正数';
-  if (!body.type || !VALID_TYPES.includes(body.type as TransactionType)) return '类型无效';
-  if (!body.account_id) return '缺少账户';
-  if (body.type === 'transfer') {
-    if (!body.target_account_id) return '转账需要目标账户';
-    if (body.target_account_id === body.account_id) return '源账户和目标账户不能相同';
-  }
-  return null;
-}
-
-/**
  * POST /api/transactions
  */
 export async function createTransaction(request: Request, env: D1Database): Promise<Response> {
-  let body: Partial<Transaction>;
+  let body: unknown;
   try {
-    body = (await request.json()) as Partial<Transaction>;
+    body = await request.json();
   } catch {
     return fail('INVALID_JSON', '请求体不是合法 JSON');
   }
-
-  const err = validateTransactionPayload(body);
-  if (err) return fail('INVALID_INPUT', err);
+  const parsed = NewTransactionSchema.safeParse(body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return fail('INVALID_INPUT', issue ? issue.message : '输入校验失败');
+  }
+  const data = parsed.data;
 
   const now = nowIso();
   const tx: Transaction = {
-    id: ulid(),
-    date: body.date!,
-    amount: body.amount!,
-    type: body.type as TransactionType,
-    account_id: body.account_id!,
-    target_account_id: body.type === 'transfer' ? body.target_account_id! : null,
-    category_id: body.type === 'transfer' ? null : (body.category_id || null),
-    note: body.note?.trim() || null,
+    id: data.id || ulid(),
+    date: data.date,
+    amount: data.amount,
+    type: data.type,
+    account_id: data.account_id,
+    target_account_id: data.type === 'transfer' ? (data.target_account_id ?? null) : null,
+    category_id: data.type === 'transfer' ? null : (data.category_id ?? null),
+    note: data.note ?? null,
     created_at: now,
     updated_at: now,
     last_modified: now,
     deleted: 0,
   };
-  await env.prepare(
-    `INSERT INTO transactions (id, date, amount, type, account_id, target_account_id, category_id, note, created_at, updated_at, last_modified, deleted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-  )
+  await env
+    .prepare(
+      `INSERT INTO transactions (id, date, amount, type, account_id, target_account_id, category_id, note, created_at, updated_at, last_modified, deleted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+    )
     .bind(
       tx.id,
       tx.date,
@@ -139,44 +139,51 @@ export async function createTransaction(request: Request, env: D1Database): Prom
 
 /**
  * PUT /api/transactions/:id
+ * 白名单 spread：仅允许修改业务字段，id/deleted/created_at 不接受
  */
 export async function updateTransaction(
   request: Request,
   env: D1Database,
   id: string,
 ): Promise<Response> {
-  const existing = await env.prepare('SELECT * FROM transactions WHERE id = ? AND deleted = 0')
+  const existing = await env
+    .prepare('SELECT * FROM transactions WHERE id = ? AND deleted = 0')
     .bind(id)
     .first<Transaction>();
   if (!existing) return fail('NOT_FOUND', '交易不存在', 404);
 
-  let body: Partial<Transaction>;
+  let body: unknown;
   try {
-    body = (await request.json()) as Partial<Transaction>;
+    body = await request.json();
   } catch {
     return fail('INVALID_JSON', '请求体不是合法 JSON');
   }
-
-  const err = validateTransactionPayload({ ...existing, ...body });
-  if (err) return fail('INVALID_INPUT', err);
+  // 仅接受 NewTransaction 字段（防篡改 id/deleted/created_at）
+  const parsed = NewTransactionBaseSchema.partial().safeParse(body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    return fail('INVALID_INPUT', issue ? issue.message : '输入校验失败');
+  }
+  const data = parsed.data;
 
   const now = nowIso();
   const updated: Transaction = {
     ...existing,
-    date: body.date ?? existing.date,
-    amount: body.amount ?? existing.amount,
-    type: (body.type as TransactionType) ?? existing.type,
-    account_id: body.account_id ?? existing.account_id,
+    date: data.date ?? existing.date,
+    amount: data.amount ?? existing.amount,
+    type: (data.type as TransactionType | undefined) ?? existing.type,
+    account_id: data.account_id ?? existing.account_id,
     target_account_id:
-      body.target_account_id !== undefined ? body.target_account_id : existing.target_account_id,
-    category_id: body.category_id !== undefined ? body.category_id : existing.category_id,
-    note: body.note !== undefined ? body.note?.trim() || null : existing.note,
+      data.target_account_id !== undefined ? data.target_account_id : existing.target_account_id,
+    category_id: data.category_id !== undefined ? data.category_id : existing.category_id,
+    note: data.note !== undefined ? data.note : existing.note,
     updated_at: now,
     last_modified: now,
   };
-  await env.prepare(
-    `UPDATE transactions SET date = ?, amount = ?, type = ?, account_id = ?, target_account_id = ?, category_id = ?, note = ?, updated_at = ?, last_modified = ? WHERE id = ?`,
-  )
+  await env
+    .prepare(
+      `UPDATE transactions SET date = ?, amount = ?, type = ?, account_id = ?, target_account_id = ?, category_id = ?, note = ?, updated_at = ?, last_modified = ? WHERE id = ?`,
+    )
     .bind(
       updated.date,
       updated.amount,
@@ -197,14 +204,14 @@ export async function updateTransaction(
  * DELETE /api/transactions/:id
  */
 export async function deleteTransaction(env: D1Database, id: string): Promise<Response> {
-  const existing = await env.prepare('SELECT id FROM transactions WHERE id = ? AND deleted = 0')
+  const existing = await env
+    .prepare('SELECT id FROM transactions WHERE id = ? AND deleted = 0')
     .bind(id)
     .first();
   if (!existing) return fail('NOT_FOUND', '交易不存在', 404);
   const now = nowIso();
-  await env.prepare(
-    'UPDATE transactions SET deleted = 1, updated_at = ?, last_modified = ? WHERE id = ?',
-  )
+  await env
+    .prepare('UPDATE transactions SET deleted = 1, updated_at = ?, last_modified = ? WHERE id = ?')
     .bind(now, now, id)
     .run();
   return ok({ id, deleted: true });

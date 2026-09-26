@@ -1,10 +1,18 @@
 // 离线写入队列
 // 在离线或网络错误时，把变更暂存到 IndexedDB，联网后由 sync 自动回放
-import { db, type PendingOp } from './db';
+import { db } from './db';
+import type { Table } from 'dexie';
 import type { Account, Category, Transaction } from './api-types';
 
 type EntityName = 'accounts' | 'categories' | 'transactions';
 type EntityRow = Account | Category | Transaction;
+
+interface MutationResult<T = unknown> {
+  ok: boolean;
+  queued?: boolean;
+  data?: T;
+  error?: { code: string; message: string };
+}
 
 /**
  * 写入本地 IndexedDB（软删除用 deleted=1）
@@ -14,14 +22,15 @@ async function applyLocal(
   op: 'create' | 'update' | 'delete',
   data: EntityRow & { id: string },
 ): Promise<void> {
-  const table = db[entity];
+  // 类型擦除：三个表的 update/put 签名不同，统一用 Table<any, string> 操作
+  const table = db[entity] as unknown as Table<EntityRow, string>;
   if (op === 'delete') {
     await table.update(data.id, {
       deleted: 1,
       last_modified: new Date().toISOString(),
-    } as any);
+    });
   } else {
-    await table.put(data as any);
+    await table.put(data);
   }
 }
 
@@ -41,12 +50,7 @@ export async function mutateAndQueue<T extends EntityRow & { id: string }>(
   entity: EntityName,
   op: 'create' | 'update' | 'delete',
   data: T,
-): Promise<{
-  ok: boolean;
-  queued?: boolean;
-  data?: any;
-  error?: { code: string; message: string };
-}> {
+): Promise<MutationResult> {
   // 1. 立即写本地（保证 UI 即时响应）
   await applyLocal(entity, op, data);
 
@@ -54,22 +58,25 @@ export async function mutateAndQueue<T extends EntityRow & { id: string }>(
   const endpoint = `/api/${entity}`;
   let res;
   try {
-    if (op === 'create') res = await fetch(endpoint, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    else if (op === 'update') res = await fetch(`${endpoint}/${data.id}`, {
-      method: 'PUT',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    else res = await fetch(`${endpoint}/${data.id}`, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-    });
+    if (op === 'create')
+      res = await fetch(endpoint, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    else if (op === 'update')
+      res = await fetch(`${endpoint}/${data.id}`, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    else
+      res = await fetch(`${endpoint}/${data.id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
   } catch {
     // fetch 直接抛异常 = 网络层错误
     res = null;
@@ -94,10 +101,10 @@ export async function mutateAndQueue<T extends EntityRow & { id: string }>(
   }
 
   // 4. 业务错误（4xx）不入队，直接返回
-  const body = await res!.json().catch(() => ({
+  const body = (await res!.json().catch(() => ({
     ok: false,
     error: { code: 'PARSE_ERROR', message: '响应解析失败' },
-  }));
+  }))) as MutationResult;
   return body;
 }
 

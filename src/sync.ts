@@ -18,13 +18,15 @@ let syncing = false;
 /** 上次同步成功的服务端时间（meta 表 key） */
 const SYNC_TIME_KEY = 'lastSyncTime';
 
-/** 读取上次同步时间 */
+/** 单例状态：避免 startAutoSync 被多次调用导致 interval/online 监听器累积 */
+let intervalId: number | null = null;
+let onlineHandler: (() => void) | null = null;
+
 export async function getLastSyncTime(): Promise<string | null> {
   const row = await db.meta.get(SYNC_TIME_KEY);
   return row?.value || null;
 }
 
-/** 写入上次同步时间 */
 export async function setLastSyncTime(time: string): Promise<void> {
   await db.meta.put({ key: SYNC_TIME_KEY, value: time });
 }
@@ -91,7 +93,6 @@ export async function pushLocalChanges(): Promise<{
     return { ok: false, pushed: 0, message: res.error?.message };
   }
 
-  // 用服务端返回的最新数据覆盖
   await db.transaction('rw', db.accounts, db.categories, db.transactions, async () => {
     if (res.data!.accounts.length) await db.accounts.bulkPut(res.data!.accounts);
     if (res.data!.categories.length) await db.categories.bulkPut(res.data!.categories);
@@ -112,7 +113,6 @@ export async function syncAll(): Promise<{ ok: boolean; message?: string }> {
   try {
     await replayPendingOps();
   } catch (e) {
-    // 重放失败不阻塞后续同步
     console.warn('replayPendingOps failed:', e);
   }
 
@@ -124,38 +124,51 @@ export async function syncAll(): Promise<{ ok: boolean; message?: string }> {
   return await fullSync();
 }
 
-/** 启动自动同步：立即一次 + 60 秒周期 + 网络恢复触发 */
-export function startAutoSync(): void {
-  // 离线时跳过
-  if (!navigator.onLine) {
-    window.addEventListener(
-      'online',
-      () => {
-        startAutoSync();
-      },
-      { once: true },
-    );
-    return;
+/**
+ * 停止自动同步（清理 interval 和 online 监听器）
+ */
+export function stopAutoSync(): void {
+  if (intervalId !== null) {
+    clearInterval(intervalId);
+    intervalId = null;
   }
+  if (onlineHandler) {
+    window.removeEventListener('online', onlineHandler);
+    onlineHandler = null;
+  }
+}
 
-  // 立即同步一次
-  syncAll().catch(() => {
-    // 静默失败
-  });
+/**
+ * 启动自动同步：立即一次 + 60 秒周期 + 网络恢复触发
+ * 幂等：多次调用不会重复注册监听器
+ */
+export function startAutoSync(): void {
+  // 先清理旧的（幂等关键）
+  stopAutoSync();
 
-  // 每 60 秒同步一次
-  setInterval(() => {
+  // 实际触发同步的内部函数
+  const triggerSync = () => {
     if (navigator.onLine) {
       syncAll().catch(() => {
         // 静默失败
       });
     }
-  }, 60_000);
+  };
+
+  // 离线时先挂上 online 监听，联网后再启动完整定时器
+  if (!navigator.onLine) {
+    onlineHandler = triggerSync;
+    window.addEventListener('online', triggerSync, { once: true });
+    return;
+  }
+
+  // 立即同步一次
+  triggerSync();
+
+  // 每 60 秒同步一次
+  intervalId = window.setInterval(triggerSync, 60_000);
 
   // 网络恢复时立即同步
-  window.addEventListener('online', () => {
-    syncAll().catch(() => {
-      // 静默失败
-    });
-  });
+  onlineHandler = triggerSync;
+  window.addEventListener('online', triggerSync);
 }
