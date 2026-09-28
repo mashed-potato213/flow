@@ -28,7 +28,7 @@ export function renderLogin(root: HTMLElement) {
               autocomplete="current-password"
               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none"
               placeholder="请输入密码"
-              minlength="6"
+              minlength="10"
               required
             />
             <p id="hint" class="text-xs text-gray-500 mt-1"></p>
@@ -63,7 +63,7 @@ export function renderLogin(root: HTMLElement) {
       mode = res.data.setup ? 'login' : 'setup';
       subtitle.textContent = mode === 'setup' ? '首次使用，请设置密码' : '请输入密码继续';
       submitBtn.textContent = mode === 'setup' ? '设置密码' : '登录';
-      hint.textContent = mode === 'setup' ? '密码至少 6 个字符，请记住它' : '';
+      hint.textContent = mode === 'setup' ? '至少 10 个字符,必须含字母和数字' : '';
     } else {
       subtitle.textContent = '无法连接服务';
     }

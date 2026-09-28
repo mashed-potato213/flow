@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:worker": "wrangler dev",
+    "dev:worker": "wrangler dev --env dev",
     "dev:all": "concurrently -k -n vite,worker -c blue,green \"npm:dev\" \"npm:dev:worker\"",
     "build": "vite build",
     "preview": "vite preview",
