@@ -139,7 +139,7 @@ export async function renderCategories(root: HTMLElement) {
                 class="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:border-primary" />
             </div>
             <div>
-              <label class="block text-sm text-gray-700 mb-1">图标（emoji 或字符，可选）</label>
+              <label class="block text-sm text-gray-700 mb-1">图标</label>
               <input id="icon" type="text" maxlength="2"
                 value="${category?.icon ? escapeHtml(category.icon) : ''}"
                 placeholder="如 🍜"

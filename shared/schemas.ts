@@ -26,7 +26,7 @@ export const AccountSchema = z.object({
   name: z.string().min(1).max(50),
   type: AccountTypeSchema,
   is_payment_capable: z.union([z.literal(0), z.literal(1)]),
-  opening_balance: z.number().nonnegative().finite(),
+  opening_balance: z.number().finite(), // 允许负数：支持花呗/信用卡等借贷账户
   sort_order: z.number().nonnegative().finite(),
   created_at: z.string().min(1),
   updated_at: z.string().min(1),
@@ -109,7 +109,7 @@ export const NewAccountSchema = z.object({
   name: z.string().min(1).max(50),
   type: AccountTypeSchema,
   is_payment_capable: z.union([z.literal(0), z.literal(1)]).optional(),
-  opening_balance: z.number().nonnegative().finite().optional(),
+  opening_balance: z.number().finite().optional(), // 允许负数：支持花呗/信用卡等借贷账户
 });
 export type NewAccount = z.infer<typeof NewAccountSchema>;
 

@@ -12,24 +12,22 @@ command = "npm run build"
 directory = "./dist"
 binding = "ASSETS"
 
-# 顶层只放通用配置；D1/R2/triggers 必须在命名环境里
-# wrangler deploy 必须显式指定 --env（避免部署到错的库）
+# 顶层 = 生产环境（worker name 直接为 "flow"，URL: flow.<subdomain>.workers.dev）
+# wrangler deploy 必须省略 --env，避免被自动加 -production 后缀
 
-# 生产环境
-[env.production]
-[[env.production.d1_databases]]
+[[d1_databases]]
 binding = "DB"
 database_name = "flow-db"
 database_id = "64c1235d-bc19-4629-a705-e15c298cf115"
 
-[[env.production.r2_buckets]]
+[[r2_buckets]]
 binding = "BACKUPS"
 bucket_name = "flow-backups"
 
-[env.production.triggers]
+[triggers]
 crons = ["0 3 * * *"]
 
-# 开发环境
+# 开发环境（wrangler deploy --env dev，worker name: flow-dev）
 [env.dev]
 [[env.dev.d1_databases]]
 binding = "DB"

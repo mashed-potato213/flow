@@ -155,7 +155,6 @@ export async function renderSummary(root: HTMLElement, params: Record<string, st
           s.net >= 0 ? '+' : ''
         }${formatMoney(s.net)}</span>
       </div>
-      <div class="text-xs text-gray-400 text-center pt-1">共 ${s.tx_count} 条记录</div>
     </div>
 
     <!-- 支出饼图 -->
@@ -283,7 +282,6 @@ function renderFinanceSection(pnls: FinancePnl[]): string {
               <div class="text-sm font-medium ${
                 p.today_pnl >= 0 ? 'text-green-600' : 'text-red-600'
               }">${p.today_pnl >= 0 ? '+' : ''}${formatMoney(p.today_pnl)}</div>
-              <div class="text-xs text-gray-400">当日盈亏</div>
             </div>
           </div>
         `,

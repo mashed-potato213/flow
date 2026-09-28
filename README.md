@@ -4,7 +4,7 @@
 
 ## ✨ 功能
 
-- ✅ 账户管理（现金/银行卡/支付宝/微信 + 基金/股票账户）
+- ✅ 账户管理（现金/银行卡/支付宝/微信 + 基金/股票账户 + 花呗/信用卡等借贷账户，期初余额允许负数）
 - ✅ 分类管理（消费 / 收入 / 理财三类，预置 17 个常用分类）
 - ✅ 4 种记账类型：支出 / 收入 / 转账 / 理财市值调整
 - ✅ 月度汇总（总收入 / 总支出 / 净结余 + 分类饼图）
@@ -38,24 +38,28 @@ npm install
 ### 2. 本地数据库迁移
 
 ```powershell
-# 初始化本地 D1
-npx wrangler d1 migrations apply flow-db --local
+# 初始化本地 D1（dev 环境）
+npx wrangler d1 migrations apply flow-db-dev --local --env dev
 ```
 
 ### 3. 启动开发服务器
 
-需要两个终端：
-
-终端 A（Vite 前端开发，端口 5173）：
+一条命令同时启动前端（Vite, 端口 5173）和后端模拟（Wrangler, 端口 8787）：
 
 ```powershell
-npm run dev
+npm run dev:all
 ```
 
-终端 B（Wrangler 后端模拟，端口 8787）：
+底层用 `concurrently` 把 `vite` 与 `wrangler dev` 一起跑，输出分别用蓝色 / 绿色着色。
+
+如需分开查看两端日志，可用两个终端：
 
 ```powershell
-npx wrangler dev
+# 终端 A
+npm run dev
+
+# 终端 B
+npm run dev:worker
 ```
 
 访问 http://localhost:5173 即可。Vite 已配置代理，前端 `/api/*` 请求自动转发到 8787。
@@ -63,7 +67,7 @@ npx wrangler dev
 ### 4. 首次使用
 
 1. 打开 http://localhost:5173
-2. 设置密码（至少 6 个字符）
+2. 设置密码（至少 10 个字符，必须含字母和数字）
 3. 系统自动 seed 17 个预置分类
 4. 进入"设置 → 账户管理"，添加账户
 5. 开始记账
@@ -87,27 +91,45 @@ npx wrangler login
 ### 步骤 2：创建 D1 数据库
 
 ```powershell
-npx wrangler d1 create flow-db
+npx wrangler d1 create flow-db-dev --env dev
 ```
 
 输出形如：
 
 ```
-✅ Successfully created DB 'flow-db'
+✅ Successfully created DB 'flow-db-dev'
 database_id = "abcd1234-5678-90ab-cdef-1234567890ab"
 ```
 
-**把 `database_id` 填到 `wrangler.toml` 的 `[[d1_databases]]` 段。**
+**把 `database_id` 填到 `wrangler.toml` 的 `[env.dev]` 段下的 `[[env.dev.d1_databases]]` 项。**
+
+生产库同理（顶层配置对应，无需 `--env`）：
+
+```powershell
+npx wrangler d1 create flow-db
+```
 
 ### 步骤 3：创建 R2 Bucket
 
+按目标环境二选一：
+
 ```powershell
+# dev 环境
+npx wrangler r2 bucket create flow-backups-dev --env dev
+
+# production 环境（顶层配置对应，无需 --env）
 npx wrangler r2 bucket create flow-backups
 ```
 
 ### 步骤 4：应用数据库迁移（远程）
 
+按目标环境二选一：
+
 ```powershell
+# 推送到 dev 环境（flow-db-dev）
+npx wrangler d1 migrations apply flow-db-dev --remote --env dev
+
+# 推送到 production 环境（flow-db，顶层配置对应，无需 --env）
 npx wrangler d1 migrations apply flow-db --remote
 ```
 
@@ -136,18 +158,19 @@ git push -u origin main
 也可以手动部署：
 
 ```powershell
-npm run deploy
+npm run deploy          # 部署到生产（worker name=flow）
+npm run deploy:dev      # 部署到 dev 环境（worker name=flow-dev）
 ```
 
 部署成功后会得到 URL：`https://flow.<your-subdomain>.workers.dev`
 
 ### 步骤 8：配置 Cron Trigger
 
-到 Cloudflare Dashboard → Workers → flow → Triggers → Cron Triggers：
+Cron Trigger 在生产环境才有意义（dev 环境不开）。到 Cloudflare Dashboard → Workers → flow → Triggers → Cron Triggers：
 
 - Cron: `0 3 * * *`（UTC 3:00 = 北京时间 11:00）
 
-或通过命令行：
+或通过命令行（顶层 deploy 同步配置，无需 --env）：
 
 ```powershell
 npx wrangler triggers deploy
@@ -174,17 +197,28 @@ npx wrangler triggers deploy
 
 ```
 flow/
-├── wrangler.toml                 # Cloudflare 配置
+├── wrangler.toml                 # Cloudflare 配置（顶层 + [env.dev / production]）
 ├── package.json
 ├── tsconfig.json
 ├── vite.config.ts                # Vite + PWA
 ├── tailwind.config.js
+├── shared/
+│   └── schemas.ts                # 前后端共享 Zod schema
 ├── migrations/
 │   ├── 0001_initial.sql          # 5 张表
-│   └── 0002_preset_categories.sql # 17 个预置分类
+│   ├── 0002_preset_categories.sql # 17 个预置分类
+│   ├── 0003_account_payment_capable.sql # 账户可支付标志
+│   ├── 0004_account_sort_order.sql     # 账户排序
+│   └── 0005_indexes_and_meta.sql       # 索引 + 元数据
 ├── worker/                        # Cloudflare Worker
 │   ├── index.ts                  # 入口 + 路由分发
 │   ├── auth.ts                   # PBKDF2 + token 中间件
+│   ├── lib/                      # 公共工具
+│   │   ├── ids.ts                # ULID / ISO 时间
+│   │   ├── response.ts           # 统一响应包装
+│   │   ├── types.ts              # 实体类型
+│   │   ├── validate.ts           # Zod 校验
+│   │   └── rateLimit.ts          # 限流
 │   └── routes/
 │       ├── auth.ts               # /api/auth/*
 │       ├── accounts.ts
@@ -202,6 +236,7 @@ flow/
     ├── api-types.ts              # 共享类型
     ├── db.ts                     # Dexie IndexedDB
     ├── sync.ts                   # 双向同步
+    ├── offlineStore.ts           # 离线写入 + 待同步队列
     ├── utils.ts                  # 工具函数
     └── views/
         ├── login.ts
@@ -211,12 +246,13 @@ flow/
         ├── accounts.ts
         ├── categories.ts
         ├── settings.ts           # 同步 / 导出 / 导入
+        ├── confirm.ts            # 确认弹窗
         └── tabbar.ts             # 底部 Tab 导航
 ```
 
 ## 🔧 配置项
 
-`wrangler.toml` 关键配置：
+`wrangler.toml` 关键配置（顶层 = 生产配置，D1 / R2 / cron 直接放顶层；env 段只放其他环境）：
 
 ```toml
 name = "flow"
@@ -230,6 +266,7 @@ command = "npm run build"
 directory = "./dist"
 binding = "ASSETS"
 
+# 顶层 = 生产（worker name = "flow"，不带 -production 后缀）
 [[d1_databases]]
 binding = "DB"
 database_name = "flow-db"
@@ -241,6 +278,27 @@ bucket_name = "flow-backups"
 
 [triggers]
 crons = ["0 3 * * *"]
+
+# 开发环境（worker name = "flow-dev"）
+[env.dev]
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "flow-db-dev"
+database_id = "<从 wrangler d1 create --env dev 获取>"
+
+[[env.dev.r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "flow-backups-dev"
+
+[env.dev.triggers]
+crons = []
+```
+
+部署命令：
+
+```powershell
+npm run deploy          # 部署到生产（顶层配置，name=flow）
+npm run deploy:dev      # 部署到 dev（name=flow-dev）
 ```
 
 ## 🐛 已知限制

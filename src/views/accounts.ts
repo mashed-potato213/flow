@@ -41,7 +41,6 @@ export async function renderAccounts(root: HTMLElement) {
       <header class="bg-white border-b border-gray-200 px-4 pt-safe sticky top-0 z-10 flex items-center">
         <a href="#/settings" class="text-primary text-xl mr-3">←</a>
         <h1 class="text-xl font-bold text-gray-900 flex-1 py-4">账户管理</h1>
-        <span class="hidden sm:inline text-xs text-gray-400 mr-3">长按拖动排序</span>
         <button id="add-btn" class="text-primary font-medium">+ 新增</button>
       </header>
       <div id="content" class="p-4">
@@ -67,7 +66,6 @@ export async function renderAccounts(root: HTMLElement) {
         <div class="bg-white rounded-xl p-8 text-center text-gray-400">
           <p class="text-4xl mb-3">💳</p>
           <p>暂无账户</p>
-          <p class="text-xs mt-1">点击右上角"+ 新增"添加你的第一个账户</p>
         </div>
       `;
       return;
@@ -93,7 +91,7 @@ export async function renderAccounts(root: HTMLElement) {
               <div class="font-medium text-gray-900">${escapeHtml(a.name)}</div>
               <div class="text-xs text-gray-500 mt-1">
                 <span class="inline-block px-2 py-0.5 bg-gray-100 rounded">${accountLabel(a)}</span>
-                <span class="ml-2">余额 <span class="text-gray-900 font-medium">${formatMoney(a.balance ?? a.opening_balance)}</span></span>
+                <span class="ml-2">余额 <span class="${(a.balance ?? a.opening_balance) < 0 ? 'text-red-600' : 'text-gray-900'} font-medium">${formatMoney(a.balance ?? a.opening_balance)}</span></span>
                 ${
                   a.balance !== undefined && a.balance !== a.opening_balance
                     ? `<span class="ml-1 text-gray-400">（期初 ${formatMoney(a.opening_balance)}）</span>`
@@ -181,8 +179,8 @@ export async function renderAccounts(root: HTMLElement) {
             <div>
               <label class="block text-sm text-gray-700 mb-1">类型</label>
               <select id="type" class="w-full px-3 py-2 border border-gray-300 rounded-lg outline-none focus:border-primary">
-                <option value="payment_channel" ${account?.type === 'payment_channel' ? 'selected' : ''}>💳 支付（现金/银行卡/支付宝）</option>
-                <option value="asset_holding" ${account?.type === 'asset_holding' ? 'selected' : ''}>📊 理财（基金/股票/余额宝）</option>
+                <option value="payment_channel" ${account?.type === 'payment_channel' ? 'selected' : ''}>💳 支付</option>
+                <option value="asset_holding" ${account?.type === 'asset_holding' ? 'selected' : ''}>📊 理财</option>
               </select>
             </div>
             <div id="payment-toggle-wrap" class="${showPaymentToggle ? '' : 'hidden'}">
@@ -190,7 +188,7 @@ export async function renderAccounts(root: HTMLElement) {
                 <input id="is_payment_capable" type="checkbox"
                   ${account?.is_payment_capable ? 'checked' : ''}
                   class="mr-2 w-4 h-4 accent-primary" />
-                <span>可支付（余额宝类：理财账户同时用于付款/收款）</span>
+                <span>可支付</span>
               </label>
             </div>
             <div>
